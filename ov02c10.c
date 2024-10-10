@@ -688,7 +688,7 @@ struct ov02c10 {
 	/* Current mode */
 	const struct ov02c10_mode *cur_mode;
 
-	/* To serialize asynchronus callbacks */
+	/* To serialize asynchronous callbacks */
 	struct mutex mutex;
 
 	/* MIPI lanes used */
@@ -1129,8 +1129,9 @@ static int ov02c10_power_on(struct device *dev)
 	gpiod_set_value_cansleep(ov02c10->reset, 0);
 
 	/* Lattice MIPI aggregator with some version FW needs longer delay
-	   after handshake triggered. We set 25ms as a safe value and wait
-	   for a stable version FW. */
+	 * after handshake triggered. We set 25ms as a safe value and wait
+	 * for a stable version FW.
+	 */
 	msleep_interruptible(25);
 
 	return ret;
@@ -1572,4 +1573,4 @@ module_i2c_driver(ov02c10_i2c_driver);
 
 MODULE_AUTHOR("Hao Yao <hao.yao@intel.com>");
 MODULE_DESCRIPTION("OmniVision OV02C10 sensor driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

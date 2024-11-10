@@ -9,7 +9,9 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/version.h>
+#include <media/v4l2-cci.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
@@ -20,71 +22,52 @@
 #define OV02C10_DATA_LANES		1
 #define OV02C10_RGB_DEPTH		10
 
-#define OV02C10_REG_CHIP_ID		0x300a
-#define OV02C10_CHIP_ID			0x560243
+#define OV02C10_REG_CHIP_ID		CCI_REG16(0x300a)
+#define OV02C10_CHIP_ID			0x5602
 
-#define OV02C10_REG_MODE_SELECT		0x0100
-#define OV02C10_MODE_STANDBY		0x00
-#define OV02C10_MODE_STREAMING		0x01
+#define OV02C10_REG_STREAM_CONTROL	CCI_REG8(0x0100)
 
 /* vertical-timings from sensor */
-#define OV02C10_REG_VTS			0x380e
+#define OV02C10_REG_VTS			CCI_REG16(0x380e)
 #define OV02C10_VTS_MAX			0xffff
 
 /* Exposure controls from sensor */
-#define OV02C10_REG_EXPOSURE		0x3501
+#define OV02C10_REG_EXPOSURE		CCI_REG16(0x3501)
 #define OV02C10_EXPOSURE_MIN		4
 #define OV02C10_EXPOSURE_MAX_MARGIN	8
 #define OV02C10_EXPOSURE_STEP		1
 
 /* Analog gain controls from sensor */
-#define OV02C10_REG_ANALOG_GAIN		0x3508
+#define OV02C10_REG_ANALOG_GAIN		CCI_REG16(0x3508)
 #define OV02C10_ANAL_GAIN_MIN		0x10
 #define OV02C10_ANAL_GAIN_MAX		0xf8
 #define OV02C10_ANAL_GAIN_STEP		1
 #define OV02C10_ANAL_GAIN_DEFAULT	0x10
 
 /* Digital gain controls from sensor */
-#define OV02C10_REG_DIGILAL_GAIN	0x350a
+#define OV02C10_REG_DIGITAL_GAIN	CCI_REG24(0x350a)
 #define OV02C10_DGTL_GAIN_MIN		0x0400
 #define OV02C10_DGTL_GAIN_MAX		0x3fff
 #define OV02C10_DGTL_GAIN_STEP		1
 #define OV02C10_DGTL_GAIN_DEFAULT	0x0400
 
 /* Rotate */
-#define OV02C10_ROTATE_CONTROL			0x3820
-#define OV02C10_ISP_X_WIN_CONTROL		0x3811
-#define OV02C10_ISP_Y_WIN_CONTROL		0x3813
-#define OV02C10_CONFIG_ROTATE			0x18
+#define OV02C10_ROTATE_CONTROL		CCI_REG8(0x3820)
+#define OV02C10_ISP_X_WIN_CONTROL	CCI_REG16(0x3810)
+#define OV02C10_ISP_Y_WIN_CONTROL	CCI_REG16(0x3812)
+#define OV02C10_CONFIG_ROTATE		0x18
 
 /* Test Pattern Control */
-#define OV02C10_REG_TEST_PATTERN		0x4503
-#define OV02C10_TEST_PATTERN_ENABLE	BIT(7)
-#define OV02C10_TEST_PATTERN_BAR_SHIFT	0
+#define OV02C10_REG_TEST_PATTERN		CCI_REG8(0x4503)
+#define OV02C10_TEST_PATTERN_ENABLE		BIT(7)
 
 enum {
 	OV02C10_LINK_FREQ_400MHZ_INDEX,
 };
 
-enum module_names {
-	MODULE_OTHERS = 0,
-	MODULE_2BG203N3,
-	MODULE_CJFME32,
-	MODULE_KBFC645,
-};
-
-struct ov02c10_reg {
-	u16 address;
-	u8 val;
-};
-
-struct ov02c10_reg_list {
-	u32 num_of_regs;
-	const struct ov02c10_reg *regs;
-};
-
 struct ov02c10_link_freq_config {
-	const struct ov02c10_reg_list reg_list;
+	const struct reg_sequence *reg_sequence;
+	const int sequence_length;
 };
 
 struct ov02c10_mode {
@@ -110,51 +93,14 @@ struct ov02c10_mode {
 	u8 mipi_lanes;
 
 	/* Sensor register settings for this resolution */
-	const struct ov02c10_reg_list reg_list;
+	const struct reg_sequence *reg_sequence;
+	const int sequence_length;
 };
 
-struct mipi_camera_link_ssdb {
-	u8 version;
-	u8 sku;
-	u8 guid_csi2[16];
-	u8 devfunction;
-	u8 bus;
-	u32 dphylinkenfuses;
-	u32 clockdiv;
-	u8 link;
-	u8 lanes;
-	u32 csiparams[10];
-	u32 maxlanespeed;
-	u8 sensorcalibfileidx;
-	u8 sensorcalibfileidxInMBZ[3];
-	u8 romtype;
-	u8 vcmtype;
-	u8 platforminfo;
-	u8 platformsubinfo;
-	u8 flash;
-	u8 privacyled;
-	u8 degree;
-	u8 mipilinkdefined;
-	u32 mclkspeed;
-	u8 controllogicid;
-	u8 reserved1[3];
-	u8 mclkport;
-	u8 reserved2[13];
-} __packed;
-
-/*
- * 822ace8f-2814-4174-a56b-5f029fe079ee
- * This _DSM GUID returns a string from the sensor device, which acts as a
- * module identifier.
- */
-static const guid_t cio2_sensor_module_guid =
-	GUID_INIT(0x822ace8f, 0x2814, 0x4174,
-		  0xa5, 0x6b, 0x5f, 0x02, 0x9f, 0xe0, 0x79, 0xee);
-
-static const struct ov02c10_reg mipi_data_rate_960mbps[] = {
+static const struct reg_sequence mipi_data_rate_960mbps[] = {
 };
 
-static const struct ov02c10_reg sensor_1928x1092_1lane_30fps_setting[] = {
+static const struct reg_sequence sensor_1928x1092_1lane_30fps_setting[] = {
 	{0x0301, 0x08},
 	{0x0303, 0x06},
 	{0x0304, 0x01},
@@ -246,15 +192,15 @@ static const struct ov02c10_reg sensor_1928x1092_1lane_30fps_setting[] = {
 	{0x380e, 0x04},
 	{0x380f, 0x8c},
 	{0x3810, 0x00},
-	{0x3811, 0x03},
+	{0x3811, 0x02},
 	{0x3812, 0x00},
-	{0x3813, 0x03},
+	{0x3813, 0x02},
 	{0x3814, 0x01},
 	{0x3815, 0x01},
 	{0x3816, 0x01},
 	{0x3817, 0x01},
 
-	{0x3820, 0xa8},
+	{0x3820, 0xb0},
 	{0x3821, 0x00},
 	{0x3822, 0x80},
 	{0x3823, 0x08},
@@ -377,7 +323,7 @@ static const struct ov02c10_reg sensor_1928x1092_1lane_30fps_setting[] = {
 	{0x0316, 0x90},
 	{0x3016, 0x12},
 };
-static const struct ov02c10_reg sensor_1928x1092_2lane_30fps_setting[] = {
+static const struct reg_sequence sensor_1928x1092_2lane_30fps_setting[] = {
 	{0x0301, 0x08},
 	{0x0303, 0x06},
 	{0x0304, 0x01},
@@ -469,15 +415,15 @@ static const struct ov02c10_reg sensor_1928x1092_2lane_30fps_setting[] = {
 	{0x380e, 0x09},
 	{0x380f, 0x18},
 	{0x3810, 0x00},
-	{0x3811, 0x03},
+	{0x3811, 0x02},
 	{0x3812, 0x00},
-	{0x3813, 0x03},
+	{0x3813, 0x02},
 	{0x3814, 0x01},
 	{0x3815, 0x01},
 	{0x3816, 0x01},
 	{0x3817, 0x01},
 
-	{0x3820, 0xa8},
+	{0x3820, 0xb0},
 	{0x3821, 0x00},
 	{0x3822, 0x80},
 	{0x3823, 0x08},
@@ -619,23 +565,14 @@ static const char * const ov02c10_test_pattern_menu[] = {
 	"Color Bar type 4",
 };
 
-static const char * const ov02c10_module_names[] = {
-	[MODULE_OTHERS] = "",
-	[MODULE_2BG203N3] = "2BG203N3",
-	[MODULE_CJFME32] = "CJFME32",
-	[MODULE_KBFC645] = "KBFC645",
-};
-
 static const s64 link_freq_menu_items[] = {
 	OV02C10_LINK_FREQ_400MHZ,
 };
 
 static const struct ov02c10_link_freq_config link_freq_configs[] = {
 	[OV02C10_LINK_FREQ_400MHZ_INDEX] = {
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(mipi_data_rate_960mbps),
-			.regs = mipi_data_rate_960mbps,
-		}
+		.reg_sequence = mipi_data_rate_960mbps,
+		.sequence_length = ARRAY_SIZE(mipi_data_rate_960mbps),
 	},
 };
 
@@ -647,10 +584,8 @@ static const struct ov02c10_mode supported_modes[] = {
 		.vts_def = 1164,
 		.vts_min = 1164,
 		.mipi_lanes = 1,
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(sensor_1928x1092_1lane_30fps_setting),
-			.regs = sensor_1928x1092_1lane_30fps_setting,
-		},
+		.reg_sequence = sensor_1928x1092_1lane_30fps_setting,
+		.sequence_length = ARRAY_SIZE(sensor_1928x1092_1lane_30fps_setting),
 		.link_freq_index = OV02C10_LINK_FREQ_400MHZ_INDEX,
 	},
 	{
@@ -660,10 +595,8 @@ static const struct ov02c10_mode supported_modes[] = {
 		.vts_def = 2328,
 		.vts_min = 2328,
 		.mipi_lanes = 2,
-		.reg_list = {
-			.num_of_regs = ARRAY_SIZE(sensor_1928x1092_2lane_30fps_setting),
-			.regs = sensor_1928x1092_2lane_30fps_setting,
-		},
+		.reg_sequence = sensor_1928x1092_2lane_30fps_setting,
+		.sequence_length = ARRAY_SIZE(sensor_1928x1092_2lane_30fps_setting),
 		.link_freq_index = OV02C10_LINK_FREQ_400MHZ_INDEX,
 	},
 };
@@ -672,6 +605,7 @@ struct ov02c10 {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct v4l2_ctrl_handler ctrl_handler;
+	struct regmap *regmap;
 
 	/* V4L2 Controls */
 	struct v4l2_ctrl *link_freq;
@@ -696,9 +630,6 @@ struct ov02c10 {
 
 	/* Streaming on/off */
 	bool streaming;
-
-	/* Module name index */
-	u8 module_name_index;
 };
 
 static inline struct ov02c10 *to_ov02c10(struct v4l2_subdev *subdev)
@@ -706,84 +637,23 @@ static inline struct ov02c10 *to_ov02c10(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct ov02c10, sd);
 }
 
-static int ov02c10_read_reg(struct ov02c10 *ov02c10, u16 reg, u16 len, u32 *val)
+static int ov02c10_test_pattern(struct ov02c10 *ov02c10, int pattern)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	struct i2c_msg msgs[2];
-	u8 addr_buf[2];
-	u8 data_buf[4] = {0};
 	int ret = 0;
 
-	if (len > sizeof(data_buf))
-		return -EINVAL;
+	if (!pattern)
+		return cci_update_bits(ov02c10->regmap, OV02C10_REG_TEST_PATTERN,
+			BIT(7), 0, NULL);
 
-	put_unaligned_be16(reg, addr_buf);
-	msgs[0].addr = client->addr;
-	msgs[0].flags = 0;
-	msgs[0].len = sizeof(addr_buf);
-	msgs[0].buf = addr_buf;
-	msgs[1].addr = client->addr;
-	msgs[1].flags = I2C_M_RD;
-	msgs[1].len = len;
-	msgs[1].buf = &data_buf[sizeof(data_buf) - len];
+	cci_update_bits(ov02c10->regmap, OV02C10_REG_TEST_PATTERN,
+			0x03, pattern - 1, &ret);
+	if (ret)
+		return ret;
 
-	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+	cci_update_bits(ov02c10->regmap, OV02C10_REG_TEST_PATTERN,
+			BIT(7), OV02C10_TEST_PATTERN_ENABLE, &ret);
 
-	if (ret != ARRAY_SIZE(msgs))
-		return ret < 0 ? ret : -EIO;
-
-	*val = get_unaligned_be32(data_buf);
-
-	return 0;
-}
-
-static int ov02c10_write_reg(struct ov02c10 *ov02c10, u16 reg, u16 len, u32 val)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	u8 buf[6];
-	int ret = 0;
-
-	if (len > 4)
-		return -EINVAL;
-
-	put_unaligned_be16(reg, buf);
-	put_unaligned_be32(val << 8 * (4 - len), buf + 2);
-
-	ret = i2c_master_send(client, buf, len + 2);
-	if (ret != len + 2)
-		return ret < 0 ? ret : -EIO;
-
-	return 0;
-}
-
-static int ov02c10_write_reg_list(struct ov02c10 *ov02c10,
-				  const struct ov02c10_reg_list *r_list)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	unsigned int i;
-	int ret = 0;
-
-	for (i = 0; i < r_list->num_of_regs; i++) {
-		ret = ov02c10_write_reg(ov02c10, r_list->regs[i].address, 1,
-					r_list->regs[i].val);
-		if (ret) {
-			dev_err_ratelimited(&client->dev,
-					    "write reg 0x%4.4x return err = %d",
-					    r_list->regs[i].address, ret);
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
-static int ov02c10_test_pattern(struct ov02c10 *ov02c10, u32 pattern)
-{
-	if (pattern)
-		pattern = (pattern - 1) << OV02C10_TEST_PATTERN_BAR_SHIFT |
-			  OV02C10_TEST_PATTERN_ENABLE;
-
-	return ov02c10_write_reg(ov02c10, OV02C10_REG_TEST_PATTERN, 1, pattern);
+	return ret;
 }
 
 static int ov02c10_set_ctrl(struct v4l2_ctrl *ctrl)
@@ -811,23 +681,23 @@ static int ov02c10_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
-		ret = ov02c10_write_reg(ov02c10, OV02C10_REG_ANALOG_GAIN, 2,
-					ctrl->val << 4);
+		cci_write(ov02c10->regmap, OV02C10_REG_ANALOG_GAIN,
+			ctrl->val << 4, &ret);
 		break;
 
 	case V4L2_CID_DIGITAL_GAIN:
-		ret = ov02c10_write_reg(ov02c10, OV02C10_REG_DIGILAL_GAIN, 3,
-					ctrl->val << 6);
+		cci_write(ov02c10->regmap, OV02C10_REG_DIGITAL_GAIN,
+			ctrl->val << 6, &ret);
 		break;
 
 	case V4L2_CID_EXPOSURE:
-		ret = ov02c10_write_reg(ov02c10, OV02C10_REG_EXPOSURE, 2,
-					ctrl->val);
+		cci_write(ov02c10->regmap, OV02C10_REG_EXPOSURE,
+			ctrl->val, &ret);
 		break;
 
 	case V4L2_CID_VBLANK:
-		ret = ov02c10_write_reg(ov02c10, OV02C10_REG_VTS, 2,
-					ov02c10->cur_mode->height + ctrl->val);
+		cci_write(ov02c10->regmap, OV02C10_REG_VTS,
+			ov02c10->cur_mode->height + ctrl->val, &ret);
 		break;
 
 	case V4L2_CID_TEST_PATTERN:
@@ -929,21 +799,27 @@ static void ov02c10_update_pad_format(const struct ov02c10_mode *mode,
 static int ov02c10_start_streaming(struct ov02c10 *ov02c10)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	const struct ov02c10_reg_list *reg_list;
+	const struct reg_sequence *reg_sequence;
 	int link_freq_index;
+	int sequence_length;
 	int ret = 0;
-	u32 rotate, shift_x, shift_y;
 
 	link_freq_index = ov02c10->cur_mode->link_freq_index;
-	reg_list = &link_freq_configs[link_freq_index].reg_list;
-	ret = ov02c10_write_reg_list(ov02c10, reg_list);
+	reg_sequence = link_freq_configs[link_freq_index].reg_sequence;
+	sequence_length = link_freq_configs[link_freq_index].sequence_length;
+	ret = regmap_multi_reg_write(ov02c10->regmap,
+		reg_sequence,
+		sequence_length);
 	if (ret) {
 		dev_err(&client->dev, "failed to set plls");
 		return ret;
 	}
 
-	reg_list = &ov02c10->cur_mode->reg_list;
-	ret = ov02c10_write_reg_list(ov02c10, reg_list);
+	reg_sequence = ov02c10->cur_mode->reg_sequence;
+	sequence_length = ov02c10->cur_mode->sequence_length;
+	ret = regmap_multi_reg_write(ov02c10->regmap,
+		reg_sequence,
+		sequence_length);
 	if (ret) {
 		dev_err(&client->dev, "failed to set mode");
 		return ret;
@@ -953,54 +829,7 @@ static int ov02c10_start_streaming(struct ov02c10 *ov02c10)
 	if (ret)
 		return ret;
 
-	switch (ov02c10->module_name_index) {
-	case MODULE_CJFME32:
-	case MODULE_2BG203N3:
-	case MODULE_KBFC645:
-		ret = ov02c10_read_reg(ov02c10, OV02C10_ROTATE_CONTROL,
-				       1, &rotate);
-		if (ret)
-			dev_err(&client->dev,
-				"read ROTATE_CONTROL fail: %d", ret);
-
-		ret = ov02c10_read_reg(ov02c10, OV02C10_ISP_X_WIN_CONTROL,
-				       1, &shift_x);
-		if (ret)
-			dev_err(&client->dev,
-				"read ISP_X_WIN_CONTROL fail: %d", ret);
-
-		ret = ov02c10_read_reg(ov02c10, OV02C10_ISP_Y_WIN_CONTROL,
-				       1, &shift_y);
-		if (ret)
-			dev_err(&client->dev,
-				"read ISP_Y_WIN_CONTROL fail: %d", ret);
-
-		rotate ^= OV02C10_CONFIG_ROTATE;
-		shift_x = shift_x - 1;
-		shift_y = shift_y - 1;
-
-		ret = ov02c10_write_reg(ov02c10, OV02C10_ROTATE_CONTROL,
-					1, rotate);
-		if (ret)
-			dev_err(&client->dev,
-				"write ROTATE_CONTROL fail: %d", ret);
-
-		ret = ov02c10_write_reg(ov02c10, OV02C10_ISP_X_WIN_CONTROL,
-					1, shift_x);
-		if (ret)
-			dev_err(&client->dev,
-				"write ISP_X_WIN_CONTROL fail: %d", ret);
-
-		ret = ov02c10_write_reg(ov02c10, OV02C10_ISP_Y_WIN_CONTROL,
-					1, shift_y);
-		if (ret)
-			dev_err(&client->dev,
-				"write ISP_Y_WIN_CONTROL fail: %d", ret);
-		break;
-	}
-
-	ret = ov02c10_write_reg(ov02c10, OV02C10_REG_MODE_SELECT, 1,
-				OV02C10_MODE_STREAMING);
+	ret = cci_write(ov02c10->regmap, OV02C10_REG_STREAM_CONTROL, 1, NULL);
 	if (ret)
 		dev_err(&client->dev, "failed to start streaming");
 
@@ -1012,8 +841,7 @@ static void ov02c10_stop_streaming(struct ov02c10 *ov02c10)
 	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
 	int ret = 0;
 
-	ret = ov02c10_write_reg(ov02c10, OV02C10_REG_MODE_SELECT, 1,
-				OV02C10_MODE_STANDBY);
+	ret = cci_write(ov02c10->regmap, OV02C10_REG_STREAM_CONTROL, 0, NULL);
 	if (ret)
 		dev_err(&client->dev, "failed to stop streaming");
 }
@@ -1274,7 +1102,6 @@ static int ov02c10_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	ov02c10_update_pad_format(&supported_modes[0],
 				  v4l2_subdev_state_get_format(fh->state, 0));
 	mutex_unlock(&ov02c10->mutex);
-
 	return 0;
 }
 
@@ -1302,29 +1129,35 @@ static const struct v4l2_subdev_internal_ops ov02c10_internal_ops = {
 	.open = ov02c10_open,
 };
 
-static void ov02c10_read_mipi_lanes(struct ov02c10 *ov02c10)
+static int ov02c10_read_mipi_lanes(struct ov02c10 *ov02c10, struct device *dev)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	struct mipi_camera_link_ssdb ssdb;
+	struct v4l2_fwnode_endpoint bus_cfg = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
+	struct fwnode_handle *ep;
+	struct fwnode_handle *fwnode = dev_fwnode(dev);
+
 	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 	struct acpi_device *adev = ACPI_COMPANION(&client->dev);
 	union acpi_object *obj;
 	acpi_status status;
+	int ret;
 
 	if (!adev) {
 		dev_info(&client->dev, "Not ACPI device\n");
-		return;
+		return -EBADF;
 	}
 	status = acpi_evaluate_object(adev->handle, "SSDB", NULL, &buffer);
 	if (ACPI_FAILURE(status)) {
 		dev_info(&client->dev, "ACPI fail: %d\n", -ENODEV);
-		return;
+		return -EBADF;
 	}
 
 	obj = buffer.pointer;
 	if (!obj) {
 		dev_info(&client->dev, "Couldn't locate ACPI buffer\n");
-		return;
+		return -ENOMEM;
 	}
 
 	if (obj->type != ACPI_TYPE_BUFFER) {
@@ -1332,30 +1165,43 @@ static void ov02c10_read_mipi_lanes(struct ov02c10 *ov02c10)
 		goto out_free_buff;
 	}
 
-	if (obj->buffer.length > sizeof(ssdb)) {
-		dev_err(&client->dev, "Given buffer is too small\n");
+	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	if (!ep)
+		return -ENXIO;
+
+	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
+	fwnode_handle_put(ep);
+	if (ret)
+		return ret;
+
+	if (bus_cfg.bus.mipi_csi2.num_data_lanes != 2 &&
+	    bus_cfg.bus.mipi_csi2.num_data_lanes != 4) {
+		dev_err(dev, "number of CSI2 data lanes %d is not supported",
+			bus_cfg.bus.mipi_csi2.num_data_lanes);
+		ret = -EINVAL;
 		goto out_free_buff;
 	}
-	memcpy(&ssdb, obj->buffer.pointer, obj->buffer.length);
-	ov02c10->mipi_lanes = ssdb.lanes;
-
+	ov02c10->mipi_lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
+	ret = 0;
 out_free_buff:
 	kfree(buffer.pointer);
+	return ret;
 }
 
 static int ov02c10_identify_module(struct ov02c10 *ov02c10)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	int ret;
-	u32 val;
+	u64 chip_id;
+	u32 ret = 0;
 
-	ret = ov02c10_read_reg(ov02c10, OV02C10_REG_CHIP_ID, 3, &val);
-	if (ret)
+	ov02c10->regmap = devm_cci_regmap_init_i2c(client, 16);
+	cci_read(ov02c10->regmap, OV02C10_REG_CHIP_ID, &chip_id, &ret);
+	if (ret < 0)
 		return ret;
 
-	if (val != OV02C10_CHIP_ID) {
-		dev_err(&client->dev, "chip id mismatch: %x!=%x",
-			OV02C10_CHIP_ID, val);
+	if (chip_id != OV02C10_CHIP_ID) {
+		dev_err(&client->dev, "chip id mismatch: %x!=%llx",
+			OV02C10_CHIP_ID, chip_id);
 		return -ENXIO;
 	}
 
@@ -1431,36 +1277,6 @@ static void ov02c10_remove(struct i2c_client *client)
 	mutex_destroy(&ov02c10->mutex);
 }
 
-static int ov02c10_read_module_name(struct ov02c10 *ov02c10)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
-	struct device *dev = &client->dev;
-	union acpi_object *obj;
-	struct acpi_device *adev = ACPI_COMPANION(dev);
-	int i;
-
-	ov02c10->module_name_index = 0;
-	if (!adev)
-		return 0;
-
-	obj = acpi_evaluate_dsm_typed(adev->handle,
-				      &cio2_sensor_module_guid, 0x00,
-				      0x01, NULL, ACPI_TYPE_STRING);
-	if (!obj)
-		return 0;
-
-	dev_dbg(dev, "module name: %s", obj->string.pointer);
-	for (i = 1; i < ARRAY_SIZE(ov02c10_module_names); i++) {
-		if (!strcmp(ov02c10_module_names[i], obj->string.pointer)) {
-			ov02c10->module_name_index = i;
-			break;
-		}
-	}
-	ACPI_FREE(obj);
-
-	return 0;
-}
-
 static int ov02c10_probe(struct i2c_client *client)
 {
 	struct ov02c10 *ov02c10;
@@ -1492,8 +1308,10 @@ static int ov02c10_probe(struct i2c_client *client)
 		goto probe_error_ret;
 	}
 
-	ov02c10_read_module_name(ov02c10);
-	ov02c10_read_mipi_lanes(ov02c10);
+	ret = ov02c10_read_mipi_lanes(ov02c10, &client->dev);
+	if (ret)
+		goto probe_error_ret;
+
 	mutex_init(&ov02c10->mutex);
 	ov02c10->cur_mode = &supported_modes[0];
 	if (ov02c10->mipi_lanes == 2)

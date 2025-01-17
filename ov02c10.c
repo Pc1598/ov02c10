@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2022 Intel Corporation.
 
-#include <linux/unaligned.h>
 #include <linux/acpi.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -700,17 +699,15 @@ static const struct v4l2_ctrl_ops ov02c10_ctrl_ops = {
 
 static int ov02c10_init_controls(struct ov02c10 *ov02c10)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(&ov02c10->sd);
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	const struct ov02c10_mode *cur_mode;
 	s64 exposure_max, h_blank;
 	u32 vblank_min, vblank_max, vblank_default;
-	struct v4l2_fwnode_device_properties props;
 	int size;
 	int ret = 0;
 
 	ctrl_hdlr = &ov02c10->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 8);
 	if (ret)
 		return ret;
 
@@ -761,15 +758,6 @@ static int ov02c10_init_controls(struct ov02c10 *ov02c10)
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(ov02c10_test_pattern_menu) - 1,
 				     0, 0, ov02c10_test_pattern_menu);
-
-	ret = v4l2_fwnode_device_parse(&client->dev, &props);
-	if (ret) {
-		v4l2_ctrl_handler_free(ctrl_hdlr);
-		return ret;
-	}
-
-	v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &ov02c10_ctrl_ops, &props);
-
 	if (ctrl_hdlr->error)
 		return ctrl_hdlr->error;
 
@@ -1065,14 +1053,12 @@ static int ov02c10_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov02c10_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
+static int ov02c10_init_state(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *sd_state)
 {
-	struct ov02c10 *ov02c10 = to_ov02c10(sd);
-
-	mutex_lock(&ov02c10->mutex);
 	ov02c10_update_pad_format(&supported_modes[0],
-				  v4l2_subdev_state_get_format(fh->state, 0));
-	mutex_unlock(&ov02c10->mutex);
+				  v4l2_subdev_state_get_format(sd_state, 0));
+
 	return 0;
 }
 
@@ -1097,36 +1083,8 @@ static const struct media_entity_operations ov02c10_subdev_entity_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops ov02c10_internal_ops = {
-	.open = ov02c10_open,
+	.init_state = ov02c10_init_state,
 };
-
-static int ov02c10_read_mipi_lanes(struct ov02c10 *ov02c10, struct device *dev)
-{
-	struct v4l2_fwnode_endpoint bus_cfg = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY
-	};
-	struct fwnode_handle *ep;
-	struct fwnode_handle *fwnode = dev_fwnode(dev);
-	int ret = 0;
-
-	ep = fwnode_graph_get_next_endpoint(fwnode, NULL);
-	if (!ep)
-		return -ENXIO;
-
-	ret = v4l2_fwnode_endpoint_alloc_parse(ep, &bus_cfg);
-	fwnode_handle_put(ep);
-	if (ret)
-		return ret;
-
-	if (bus_cfg.bus.mipi_csi2.num_data_lanes != 2 &&
-	    bus_cfg.bus.mipi_csi2.num_data_lanes != 4) {
-		dev_err(dev, "number of CSI2 data lanes %d is not supported",
-			bus_cfg.bus.mipi_csi2.num_data_lanes);
-		return(-EINVAL);
-	}
-	ov02c10->mipi_lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
-	return ret;
-}
 
 static int ov02c10_identify_module(struct ov02c10 *ov02c10)
 {
@@ -1145,12 +1103,10 @@ static int ov02c10_identify_module(struct ov02c10 *ov02c10)
 		return -ENXIO;
 	}
 
-	dev_dbg(&client->dev, "chip id: 0x%llx\n", chip_id);
-
 	return 0;
 }
 
-static int ov02c10_check_hwcfg(struct device *dev)
+static int ov02c10_check_hwcfg(struct device *dev, struct ov02c10 *ov02c10)
 {
 	struct v4l2_fwnode_endpoint bus_cfg = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
@@ -1201,6 +1157,14 @@ static int ov02c10_check_hwcfg(struct device *dev)
 		}
 	}
 
+	if (bus_cfg.bus.mipi_csi2.num_data_lanes != 2 &&
+	    bus_cfg.bus.mipi_csi2.num_data_lanes != 4) {
+		dev_err(dev, "number of CSI2 data lanes %d is not supported",
+			bus_cfg.bus.mipi_csi2.num_data_lanes);
+		return(-EINVAL);
+	}
+	ov02c10->mipi_lanes = bus_cfg.bus.mipi_csi2.num_data_lanes;
+
 out_err:
 	v4l2_fwnode_endpoint_free(&bus_cfg);
 
@@ -1224,16 +1188,16 @@ static int ov02c10_probe(struct i2c_client *client)
 	struct ov02c10 *ov02c10;
 	int ret = 0;
 
+	ov02c10 = devm_kzalloc(&client->dev, sizeof(*ov02c10), GFP_KERNEL);
+	if (!ov02c10)
+		return -ENOMEM;
+
 	/* Check HW config */
-	ret = ov02c10_check_hwcfg(&client->dev);
+	ret = ov02c10_check_hwcfg(&client->dev, ov02c10);
 	if (ret) {
 		dev_err(&client->dev, "failed to check hwcfg: %d", ret);
 		return ret;
 	}
-
-	ov02c10 = devm_kzalloc(&client->dev, sizeof(*ov02c10), GFP_KERNEL);
-	if (!ov02c10)
-		return -ENOMEM;
 
 	v4l2_i2c_subdev_init(&ov02c10->sd, client, &ov02c10_subdev_ops);
 	ov02c10_get_pm_resources(&client->dev);
@@ -1249,10 +1213,6 @@ static int ov02c10_probe(struct i2c_client *client)
 		dev_err(&client->dev, "failed to find sensor: %d", ret);
 		goto probe_error_ret;
 	}
-
-	ret = ov02c10_read_mipi_lanes(ov02c10, &client->dev);
-	if (ret)
-		goto probe_error_ret;
 
 	mutex_init(&ov02c10->mutex);
 	ov02c10->cur_mode = &supported_modes[0];
